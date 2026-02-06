@@ -26,6 +26,8 @@ Public Property Get Client() As WebClient
             Auth.AddScope "mail.readwrite"
             Auth.AddScope "mail.send"
             Auth.AddScope "calendars.readwrite"
+            Auth.AddScope "calendars.readwrite.shared"
+            Auth.AddScope "group.readwrite.all"
             Auth.AddScope "contacts.readwrite"
         Else
             Auth.AddScope ".default"
@@ -295,15 +297,132 @@ Private Sub FillAttendeeCollection(ByVal fillCollection As Collection, fillStrin
     End If
 End Sub
 
-Public Function CreateEvent(UserPrincipal As String, Subject As String, BodyType As String, BodyContent As String, dStart As Date, tStart As Date, dEnd As Date, tEnd As Date, sLocation As String, sAttendees As String, sOptional As String) As WebResponse
+Public Function GetGroupID(UserPrincipal As String, sGroup As String) As String
     Dim Request As New WebRequest
+    Dim Response As New WebResponse
+    Request.Resource = "/groups"
+    GetGroupID = "Retry"
+    While GetGroupID = "Retry"
+        Set Response = Client.Execute(Request)
+        If Response.StatusCode = WebStatusCode.OK Then
+            Dim GroupInfo As Dictionary
+            For Each GroupInfo In Response.Data("value")
+                If GroupInfo("displayName") = sGroup Then
+                    GetGroupID = GroupInfo("id")
+                    Exit Function
+                End If
+            Next GroupInfo
+            GetGroupID = "Error"
+        Else
+            If Response.StatusCode = WebStatusCode.Unauthorized And InStr(Response.Content, "expired") Then
+                ClearAuthCodes
+                GetGroupID = "Retry"
+            Else
+                MsgBox "Error " & Response.StatusCode & ": " & Response.Content
+                GetGroupID = "Error"
+            End If
+        End If
+    Wend
+End Function
+
+Public Function GetCalendarGroupID(UserPrincipal As String, sCalendarGroup As String) As String
+    Dim Request As New WebRequest
+    Dim Response As New WebResponse
     If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
     If pGrantType = "authorization_code" Then
         Request.Resource = "/me"
     Else
         Request.Resource = "/users/" & UserPrincipal
     End If
-    Request.Resource = Request.Resource & "/events"
+    Request.Resource = Request.Resource & "/calendarGroups"
+    GetCalendarGroupID = "Retry"
+    While GetCalendarGroupID = "Retry"
+        Set Response = Client.Execute(Request)
+        If Response.StatusCode = WebStatusCode.OK Then
+            Dim CalendarInfo As Dictionary
+            For Each CalendarInfo In Response.Data("value")
+                If CalendarInfo("name") = sCalendarGroup Then
+                    GetCalendarGroupID = CalendarInfo("id")
+                    Exit Function
+                End If
+            Next CalendarInfo
+            GetCalendarGroupID = "Error"
+        Else
+            If Response.StatusCode = WebStatusCode.Unauthorized And InStr(Response.Content, "expired") Then
+                ClearAuthCodes
+                GetCalendarGroupID = "Retry"
+            Else
+                MsgBox "Error " & Response.StatusCode & ": " & Response.Content
+                GetCalendarGroupID = "Error"
+            End If
+        End If
+    Wend
+End Function
+
+Public Function GetCalendarID(UserPrincipal As String, sCalendarName As String, sCalendarGroup As String) As String
+    Dim Request As New WebRequest
+    Dim Response As New WebResponse
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    If sCalendarGroup <> "" Then
+        If sCalendarGroup = "Groups" Then
+            Request.Resource = "/groups/" & GetGroupID(UserPrincipal, sCalendarName) & "/calendar"
+        Else
+            Request.Resource = Request.Resource & "/calendarGroups/" & GetCalendarGroupID(UserPrincipal, sCalendarGroup) & "/calendars"
+        End If
+    Else
+        Request.Resource = Request.Resource & "/calendars"
+    End If
+    GetCalendarID = "Retry"
+    While GetCalendarID = "Retry"
+        Set Response = Client.Execute(Request)
+        If Response.StatusCode = WebStatusCode.OK Then
+            Dim CalendarInfo As Dictionary
+            If sCalendarGroup = "Groups" Then
+                GetCalendarID = Response.Data("id")
+            Else
+                For Each CalendarInfo In Response.Data("value")
+                    If CalendarInfo("name") = sCalendarName Then
+                        GetCalendarID = CalendarInfo("id")
+                        Exit Function
+                    End If
+                Next CalendarInfo
+                GetCalendarID = "Error"
+            End If
+        Else
+            If Response.StatusCode = WebStatusCode.Unauthorized And InStr(Response.Content, "expired") Then
+                ClearAuthCodes
+                GetCalendarID = "Retry"
+            Else
+                MsgBox "Error " & Response.StatusCode & ": " & Response.Content
+                GetCalendarID = "Error"
+            End If
+        End If
+    Wend
+End Function
+
+Public Function CreateEvent(UserPrincipal As String, Subject As String, BodyType As String, BodyContent As String, dStart As Date, tStart As Date, dEnd As Date, tEnd As Date, sLocation As String, sAttendees As String, sOptional As String, sCalendarGroup As String, sCalendarName As String) As WebResponse
+    Dim Request As New WebRequest
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If sCalendarGroup = "Groups" Then
+        Request.Resource = "groups/" & GetGroupID(UserPrincipal, sCalendarName) & "/calendar/events"
+    Else
+        If pGrantType = "authorization_code" Then
+            Request.Resource = "/me"
+        Else
+            Request.Resource = "/users/" & UserPrincipal
+        End If
+        If sCalendarName <> "" Then
+            'Get Calendar ID from sCalendarName
+            Request.Resource = Request.Resource & "/calendars/" & GetCalendarID(UserPrincipal, sCalendarName, sCalendarGroup) & "/events"
+        Else
+            Request.Resource = Request.Resource & "/events"
+        End If
+    End If
     Request.Method = WebMethod.HttpPOST
     Request.Format = WebFormat.JSON
 
@@ -554,5 +673,6 @@ Public Function GetMailFolderID(UserPrincipal As String, sFolder As String) As S
         End If
     Wend
 End Function
+
 
 
