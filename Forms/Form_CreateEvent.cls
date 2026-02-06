@@ -20,7 +20,7 @@ Private Sub cmdCreateEvent_Click()
         MsgBox "From whose mailbox is mandatory and must be a valid mailbox in this client."
         Me.fromMailbox.SetFocus
     Else
-        CreateCalendarEvent Graph.CreateEvent(Nz(Me.fromMailbox, ""), Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), dStart, tStart, dEnd, tEnd, Nz(sLocation, ""), Nz(Me.sAttendees, ""), Nz(Me.sOptional, ""))
+        CreateCalendarEvent Graph.CreateEvent(Nz(Me.fromMailbox, ""), Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), dStart, tStart, dEnd, tEnd, Nz(sLocation, ""), Nz(Me.sAttendees, ""), Nz(Me.sOptional, ""), "", "")
     End If
 End Sub
 
