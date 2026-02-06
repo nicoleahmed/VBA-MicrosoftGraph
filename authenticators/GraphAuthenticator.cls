@@ -178,7 +178,10 @@ End Sub
 Public Sub Login() ' If you have Access with the new Web browser control
     On Error GoTo auth_ErrorHandling
     Dim dtEnd As Date
-
+    Dim authIE_ReadyState As Integer
+    Dim authIE_LocationURL As String
+    Dim authIE_innerHTML As String
+    
     ' No need to login if API key, authorization code, or token have been set
     If Me.ApiKey <> "" Or Me.AuthorizationCode <> "" Or Me.Token <> "" Then
         Exit Sub
@@ -204,8 +207,14 @@ Public Sub Login() ' If you have Access with the new Web browser control
 
     ' Wait for login to complete
     dtEnd = DateAdd("s", WaitForLogin, Now)
-    Do While Not auth_LoginIsComplete(auth_IE)
+    authIE_ReadyState = auth_IE.ReadyState
+    authIE_LocationURL = auth_IE.LocationURL
+    authIE_innerHTML = auth_IE.RetrieveJavascriptValue("document.documentElement.innerHTML")
+    Do While Not auth_LoginIsComplete(authIE_ReadyState, authIE_LocationURL, authIE_innerHTML) 'auth_IE
         DoEvents
+        authIE_ReadyState = auth_IE.ReadyState
+        authIE_LocationURL = auth_IE.LocationURL
+        authIE_innerHTML = auth_IE.RetrieveJavascriptValue("document.documentElement.innerHTML")
         If Now > dtEnd Then
             Err.Raise 11042 + vbObjectError, "OAuthDialog", "Login error: Wait time exceeded."
             Exit Do
@@ -213,19 +222,19 @@ Public Sub Login() ' If you have Access with the new Web browser control
     Loop
     auth_Completed = True
 
-    If auth_LoginIsDenied(auth_IE) Then
+    If Not auth_IE Is Nothing Then: DoCmd.Close acForm, "EdgeForm"
+    Set auth_IE = Nothing
+
+    If auth_LoginIsDenied(authIE_LocationURL) Then 'auth_IE
         Err.Raise 11040 + vbObjectError, "OAuthDialog", "Login failed or was denied"
-    ElseIf auth_LoginIsError(auth_IE) Then
+    ElseIf auth_LoginIsError(authIE_LocationURL, authIE_innerHTML) Then 'auth_IE
         Err.Raise 11040 + vbObjectError, "OAuthDialog", "Login error: " & auth_LoginExtractError(auth_IE)
     End If
 
     ' Success!
-    Me.AuthorizationCode = auth_LoginExtractCode(auth_IE)
+    Me.AuthorizationCode = auth_LoginExtractCode(authIE_LocationURL) 'auth_IE
 
 auth_Cleanup:
-
-    If Not auth_IE Is Nothing Then: DoCmd.Close acForm, "EdgeForm"
-    Set auth_IE = Nothing
 
     If Err.Number = 0 And auth_Completed Then
         WebHelpers.LogDebug "Login succeeded: " & Me.AuthorizationCode, "GraphAuthenticator.Login"
@@ -455,7 +464,7 @@ End Function
 
 Private Function IEauth_LoginIsComplete(auth_IE As Object) As Boolean
     If Not auth_IE.Busy And auth_IE.ReadyState = 4 Then
-        IEauth_LoginIsComplete = auth_LoginIsApproval(auth_IE) Or IEauth_LoginIsError(auth_IE)
+        IEauth_LoginIsComplete = auth_LoginIsApproval(auth_IE.LocationURL) Or IEauth_LoginIsError(auth_IE)
     End If
 End Function
 
@@ -463,7 +472,7 @@ Private Function IEauth_LoginIsDenied(auth_IE As Object) As Boolean
     Dim auth_Document As Object
     Dim auth_Element As Object
 
-    If auth_LoginIsApproval(auth_IE) Then
+    If auth_LoginIsApproval(auth_IE.LocationURL) Then
         For Each auth_Element In auth_IE.Document.body.All
             If VBA.UCase(auth_Element.NodeName) = "P" And auth_Element.Id = "access_denied" Then
                 IEauth_LoginIsDenied = True
@@ -489,42 +498,50 @@ Private Function IEauth_LoginExtractError(auth_IE As Object) As String
     Next auth_Element
 End Function
 
-Private Function auth_LoginIsApproval(auth_IE As Object) As Boolean
-    auth_LoginIsApproval = InStr(auth_IE.LocationURL, "?code=") > 1
+Private Function auth_LoginIsApproval(authIE_LocationURL As String) As Boolean 'auth_IE As Object
+    auth_LoginIsApproval = InStr(authIE_LocationURL, "?code=") > 1 'auth_IE.LocationURL
 End Function
 
-Private Function auth_LoginExtractCode(auth_IE As Object) As String
+Private Function auth_LoginExtractCode(authIE_LocationURL As String) As String 'auth_IE As Object
     Dim sRedirectURL As String
     
-    sRedirectURL = auth_IE.LocationURL
+    sRedirectURL = authIE_LocationURL 'auth_IE.LocationURL
     sRedirectURL = Mid(sRedirectURL, InStr(sRedirectURL, "code=") + 5)
     sRedirectURL = Left(sRedirectURL, InStr(sRedirectURL, "session_state=") - 2)
     auth_LoginExtractCode = sRedirectURL
     
-    sSessionID = auth_IE.LocationURL
+    sSessionID = authIE_LocationURL 'auth_IE.LocationURL
     sSessionID = Mid(sSessionID, InStr(sSessionID, "session_state=") + 14)
 End Function
 
-Private Function auth_LoginIsComplete(auth_IE As Object) As Boolean
-    If auth_IE.ReadyState = 4 Then
-        auth_LoginIsComplete = auth_LoginIsApproval(auth_IE) Or auth_LoginIsError(auth_IE)
+Private Function auth_LoginIsComplete(authIE_ReadyState As Integer, authIE_LocationURL As String, authIE_innerHTML As String) As Boolean 'auth_IE As Object
+    If authIE_ReadyState = 4 Then 'auth_IE.ReadyState
+        auth_LoginIsComplete = auth_LoginIsApproval(authIE_LocationURL) Or auth_LoginIsError(authIE_LocationURL, authIE_innerHTML) 'auth_IE
     End If
 End Function
 
-Private Function auth_LoginIsError(auth_IE As Object) As Boolean
+Private Function auth_LoginIsError(authIE_LocationURL As String, authIE_innerHTML As String) As Boolean 'auth_IE As Object
     DoEvents
-    If InStr(auth_IE.LocationURL, "scope") > 1 Then
+    If InStr(authIE_LocationURL, "scope") > 1 Then 'auth_IE.LocationURL
         auth_LoginIsError = False
     Else
-        auth_LoginIsError = InStr(1, auth_IE.RetrieveJavascriptValue("document.documentElement.innerHTML"), "error") > 0
+        If InStr(1, authIE_innerHTML, "error") > 0 Then 'auth_IE.RetrieveJavascriptValue("document.documentElement.innerHTML")
+            If InStr(1, authIE_innerHTML, "error=interaction_required") > 0 Then
+                auth_LoginIsError = False
+            Else
+                auth_LoginIsError = True
+            End If
+        Else
+            auth_LoginIsError = False
+        End If
     End If
 End Function
 
-Private Function auth_LoginIsDenied(auth_IE As Object) As Boolean
+Private Function auth_LoginIsDenied(authIE_LocationURL As String) As Boolean 'auth_IE As Object
     Dim auth_Document As Object
     Dim auth_Element As Object
 
-    If auth_LoginIsApproval(auth_IE) Then
+    If auth_LoginIsApproval(authIE_LocationURL) Then 'auth_IE
 '        For Each auth_Element In auth_IE.Object.Document.body.All
 '            If VBA.UCase(auth_Element.NodeName) = "P" And auth_Element.Id = "access_denied" Then
 '                auth_LoginIsDenied = True
@@ -542,3 +559,5 @@ End Function
 Private Sub Class_Initialize()
     Me.Scopes = Array("")
 End Sub
+
+
