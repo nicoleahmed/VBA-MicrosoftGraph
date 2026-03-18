@@ -8,7 +8,7 @@ VBA-MicrosoftGraph makes working with the Microsoft Graph WEB API from VBA easie
 Getting started
 ---------------
 
-- Download the [latest release (v2.0)](https://github.com/mbarnesatbbs/VBA-MicrosoftGraph/releases)
+- Download the [latest release (v2.1)](https://github.com/mbarnesatbbs/VBA-MicrosoftGraph/releases)
 
 ### About
 
